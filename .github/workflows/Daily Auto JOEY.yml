@@ -1,0 +1,61 @@
+name: Daily Auto JOEY Release _worker.js
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 每天 UTC 00:00 运行
+  workflow_dispatch:
+
+jobs:
+  download-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current UTC timestamp
+        run: echo "DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+
+      - name: Download remote repo
+        run: |
+          curl -L -o repo.zip "https://codeload.github.com/byJoey/cfnew/zip/refs/heads/main"
+          unzip repo.zip -d source
+          ls -R source
+
+      - name: Force replace _worker.js
+        run: |
+          FILE_PATH=$(find source -type f -name "少年你相信光吗" | head -n 1)
+          if [ -z "$FILE_PATH" ]; then
+            echo "::error::❌ 找不到 少年你相信光吗 文件" && exit 1
+          fi
+          cp "$FILE_PATH" _worker.js
+          echo "✅ 替换成功"
+
+      - name: Backup _worker.js
+        run: |
+          mkdir -p backups
+          BACKUP_NAME="$(date +%Y%m%d%H%M%S)_worker.js"
+          cp _worker.js "backups/${BACKUP_NAME}"
+          echo "✅ 已备份为 backups/${BACKUP_NAME}"
+          ls -tp backups/ | grep -v '/$' | tail -n +11 | xargs -I {} rm -f "backups/{}"
+
+      # ✅ 使用 ncipollo/release-action 来创建 Release 和上传资源
+      - name: Create GitHub Release and upload assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ github.run_id }}
+          name: 自动发布 v${{ github.run_id }}
+          body: |
+            🔄 每日自动同步 _worker.js  
+            📅 时间：${{ env.DATE }}
+          artifacts: "_worker.js,backups/*.js"
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and push _worker.js + backups
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add _worker.js backups/
+          git diff --cached --quiet || git commit -m "🔄 自动更新 _worker.js 于 ${{ env.DATE }} [skip ci]"
+          git push origin HEAD:main
